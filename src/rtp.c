@@ -58,7 +58,7 @@ static packet_t *packetize(char *buffer, int length, int *count) {
     if (left_over != 0) num_packets++;
     *count = num_packets;
 
-    packet_t *packets = malloc((size_t) num_packets * sizeof(*packets)); // ?
+    packet_t *packets = malloc((size_t) num_packets * sizeof(*packets));
     for (int i = 0; i < num_packets; i++) {
         if (i == num_packets - 1) {             // last packet
             packets[i].type = LAST_DATA;
@@ -71,8 +71,8 @@ static packet_t *packetize(char *buffer, int length, int *count) {
             packets[i].type = DATA;
             packets[i].payload_length = MAX_PAYLOAD_LENGTH;
         }
-        packets[i].checksum = checksum(&buffer[i], packets[i].payload_length);
-        memcpy(packets[i].payload, &buffer[i], (size_t) packets[i].payload_length);
+        packets[i].checksum = checksum(buffer + i * MAX_PAYLOAD_LENGTH, packets[i].payload_length);
+        memcpy(packets[i].payload, buffer + i * MAX_PAYLOAD_LENGTH, (size_t) packets[i].payload_length);
     }
     return packets;
 }
@@ -141,6 +141,7 @@ static void *rtp_recv_thread(void *void_ptr) {
                 pthread_mutex_lock(&connection->send_mutex);
                 net_send_packet(connection->net_connection_handle, &back_packet);
                 pthread_mutex_unlock(&connection->send_mutex);
+                
             } else if (packet.type == NACK || packet.type == ACK) {
                 pthread_mutex_lock(&connection->ack_mutex);
                 if (packet.type == NACK) connection->ack = 1;
@@ -161,7 +162,7 @@ static void *rtp_recv_thread(void *void_ptr) {
             * 1. Add message to the received queue.
             * 2. Signal the client thread that a message has been received.
             */
-            
+
             message = malloc(sizeof(message_t));
             message->length = buffer_length;
             message->buffer = malloc((size_t) buffer_length);
@@ -222,8 +223,12 @@ static void *rtp_send_thread(void *void_ptr) {
              *  3. If it was an ACK, continue sending the packets.
              *  4. If it was a NACK, resend the last packet
              */
-
-
+            
+            pthread_mutex_lock(&connection->ack_mutex);
+            if (connection->ack == 0) pthread_cond_wait(&connection->ack_cond, &connection->ack_mutex);
+            if ((i >= 0) && (connection->ack == 1)) i--;        // NACK
+            connection->ack = 0;
+            pthread_mutex_unlock(&connection->ack_mutex);
         }
 
         free(packet_array);

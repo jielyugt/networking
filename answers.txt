@@ -1,0 +1,37 @@
+[Question A]
+
+Q:  How does the protocol implemented in this project ensure that 
+    the entirety of a message is received by the other end, even if packets are lost?
+
+A:  In the stop-and-wait protocol, sender send one packet, wait for the receiver to respond.
+    When a message is received by the receiver, the receiver will compute the checksum 
+    from the payload, and compare the result with the checksum filed in packet_t. 
+    If the two checksum matches, ACK will be sent from the receiver to the sender.
+    If not, the packet is corrupted, and NACK will be sent.
+    The sender will send the next packet if it received ACK, or the current packet again
+    of it received NACK until ACK is received. So, even if a packet is corrupted or lost,
+    the same packet will be sent again until ACK is received.
+    It can then be sure that the packet is received by the receiver.
+
+[Question B]
+
+Q:  What is the benefit of dividing a message over multiple packets 
+    rather than sending it as a single packet?
+
+A:  If single big packet is corrupted, it will have to be sent again. By breaking the
+    message into smaller data packets, we only have to resend small packets. Also,
+    big packets will cause too much pressure on the network as message switching is
+    not as efficient as packet switching. Furthermore, message switching is more dangerous
+    when message is hacked because the whole message will be hacked. On the other hand, 
+    information are harder to be derived from a packet or a series of packets.
+
+[Question C]
+
+Q:  How might you improve the protocol implemented in this project 
+    in order to finish sending messages more quickly? 
+    (Note: You implemented a transport layer protocol in this project. 
+    You cannot suggest an improvement to a different layer, such as improving the bitrate.)
+
+A:  Here we used stop-and-wait protocol. A packet will not be sent untill the receiver send ACK
+    for the previous one. It is inefficient. We can imporve it by using reliable pipelined protocol
+    to send a set of packets at a time, and wait for ACKs.
