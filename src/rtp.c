@@ -30,7 +30,11 @@ static int checksum(char *buffer, int length) {
      *  values of all the characters in the buffer, and return the total.
      */
 
-    return 0;
+    int sum = 0;
+    for (int i = 0; i < length; i++) {
+        sum += buffer[i];
+    }
+    return sum;
 }
 
 /*
@@ -48,9 +52,28 @@ static packet_t *packetize(char *buffer, int length, int *count) {
      *  integer pointed to by 'count' should be updated to indicate
      *  the number of packets in the array.
      */
-    packet_t *packets;
+    
+    int num_packets = length / MAX_PAYLOAD_LENGTH;
+    int left_over = length % MAX_PAYLOAD_LENGTH;
+    if (left_over != 0) num_packets++;
+    *count = num_packets;
 
-
+    packet_t *packets = malloc((size_t) num_packets * sizeof(*packets)); // ?
+    for (int i = 0; i < num_packets; i++) {
+        if (i == num_packets - 1) {             // last packet
+            packets[i].type = LAST_DATA;
+            if (left_over != 0) {
+                packets[i].payload_length = left_over; 
+            } else {
+                packets[i].payload_length = MAX_PAYLOAD_LENGTH;
+            }
+        } else {
+            packets[i].type = DATA;
+            packets[i].payload_length = MAX_PAYLOAD_LENGTH;
+        }
+        packets[i].checksum = checksum(&buffer[i], packets[i].payload_length);
+        memcpy(packets[i].payload, &buffer[i], (size_t) packets[i].payload_length);
+    }
     return packets;
 }
 
@@ -88,7 +111,6 @@ static void *rtp_recv_thread(void *void_ptr) {
             * 4. if the payload matches, add the payload to the buffer
             */
 
-
             /*
             * 
             *  What if the packet received is not a data packet?
@@ -102,6 +124,31 @@ static void *rtp_recv_thread(void *void_ptr) {
             *     received.
             */
 
+            packet_t back_packet;
+
+            if (packet.type == DATA || packet.type == LAST_DATA) {
+                if (packet.checksum != checksum(packet.payload, packet.payload_length)) {
+                    // NACK
+                    back_packet.type = NACK;
+                    if (packet.type == LAST_DATA) packet.type = NACK;       // make sure the loop does not terminate
+                } else {
+                    // ACK
+                    back_packet.type = ACK;
+                    buffer = realloc(buffer, (size_t) buffer_length + (size_t) packet.payload_length);
+                    memcpy(buffer + buffer_length, packet.payload, (size_t) packet.payload_length);
+                    buffer_length += packet.payload_length;
+                }
+                pthread_mutex_lock(&connection->send_mutex);
+                net_send_packet(connection->net_connection_handle, &back_packet);
+                pthread_mutex_unlock(&connection->send_mutex);
+            } else if (packet.type == NACK || packet.type == ACK) {
+                pthread_mutex_lock(&connection->ack_mutex);
+                if (packet.type == NACK) connection->ack = 1;
+                else connection->ack = 2;
+                pthread_cond_signal(&connection->ack_cond);
+                pthread_mutex_unlock(&connection->ack_mutex);
+            }
+
 
         } while (packet.type != LAST_DATA);
 
@@ -114,7 +161,15 @@ static void *rtp_recv_thread(void *void_ptr) {
             * 1. Add message to the received queue.
             * 2. Signal the client thread that a message has been received.
             */
-
+            
+            message = malloc(sizeof(message_t));
+            message->length = buffer_length;
+            message->buffer = malloc((size_t) buffer_length);
+            memcpy(message->buffer, buffer,(size_t) buffer_length);
+            pthread_mutex_lock(&connection->recv_mutex);
+            queue_add(&connection->recv_queue, message);
+            pthread_cond_signal(&connection->recv_cond);
+            pthread_mutex_unlock(&connection->recv_mutex);
 
         } else free(buffer);
 
